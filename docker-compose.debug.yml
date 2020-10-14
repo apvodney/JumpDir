@@ -1,0 +1,9 @@
+version: '3.4'
+
+services:
+  web:
+    image: jumpdir:debug
+    ports:
+      - "80:8080"
+    links:
+      - "db:debug_db"

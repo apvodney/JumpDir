@@ -1,0 +1,6 @@
+FROM scratch
+ARG name
+EXPOSE 8080/tcp
+CMD ["/app"]
+COPY ./migrations /migrations
+COPY ./${name} /app
