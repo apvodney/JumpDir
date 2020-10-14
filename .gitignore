@@ -1,1 +1,3 @@
 secret*
+/src/debug_bin
+/src/prod_bin
