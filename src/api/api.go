@@ -16,37 +16,54 @@ import (
 
 func initsql() (error, *pgxpool.Pool) {
 	if debug.True {
-		dbpool, err := pgxpool.Connect(context.Background(), "host=debug_db user=postgres sslmode=disable pool_max_conns=5")
-		defer dbpool.Close()
-		if err != nil {
-			return fmt.Errorf("Can't connect or invalid config: %w", err), nil
+		var dbpool *pgxpool.Pool
+		for {
+			var err error
+			dbpool, err = pgxpool.Connect(context.Background(), "host=debug_db user=postgres sslmode=disable pool_max_conns=5")
+			if err != nil {
+				fmt.Printf("Can't connect or invalid config: %s\n", err)
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			break
 		}
+		defer dbpool.Close()
 		dbpool.Exec(context.Background(), "DROP DATABASE directory")
-		_, err = dbpool.Exec(context.Background(), "CREATE DATABASE directory")
+		_, err := dbpool.Exec(context.Background(), "CREATE DATABASE directory")
 		if err != nil {
 			return fmt.Errorf("failed to create DB: %w", err), nil
 		}
 	}
-
-	db, err := sql.Open("pgx", "host=db user=postgres dbname=directory sslmode=disable")
-	defer db.Close()
-	if err != nil {
-		return fmt.Errorf("Can't connect or invalid config: %w", err), nil
+	var db *sql.DB
+	for {
+		var err error
+		db, err = sql.Open("pgx", "host=db user=postgres dbname=directory sslmode=disable")
+		if err != nil {
+			fmt.Printf("Can't connect or invalid config: %s\n", err)
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		break
 	}
+	defer db.Close()
 
 	migrations := &migrate.FileMigrationSource{
 		Dir: "migrations",
 	}
-	_, err = migrate.Exec(db, "postgres", migrations, migrate.Up)
+	_, err := migrate.Exec(db, "postgres", migrations, migrate.Up)
 	if err != nil {
 		return fmt.Errorf("Failure migrating: %w", err), nil
 	}
 
-	dbpool, err := pgxpool.Connect(context.Background(), "host=db user=postgres dbname=directory sslmode=disable pool_max_conns=5")
-	if err != nil {
-		return fmt.Errorf("Can't connect or invalid config: %w", err), nil
+	for {
+		dbpool, err := pgxpool.Connect(context.Background(), "host=db user=postgres dbname=directory sslmode=disable pool_max_conns=5")
+		if err != nil {
+			fmt.Printf("Can't connect or invalid config: %s\n", err)
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		return nil, dbpool
 	}
-	return nil, dbpool
 }
 
 type Api struct {
