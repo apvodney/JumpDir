@@ -1,159 +1,146 @@
 package api
 
 import (
-	"github.com/apvodney/JumpDir/debug"
-
-	"database/sql"
-	"github.com/jackc/pgx/v4/pgxpool"
-	_ "github.com/jackc/pgx/v4/stdlib"
-	"github.com/rubenv/sql-migrate"
-
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
+	"log"
 	"time"
 )
 
-func initsql() (error, *pgxpool.Pool) {
-	if debug.True {
-		var dbpool *pgxpool.Pool
-		for {
-			var err error
-			dbpool, err = pgxpool.Connect(context.Background(), "host=debug_db user=postgres sslmode=disable pool_max_conns=5")
-			if err != nil {
-				fmt.Printf("Can't connect or invalid config: %s\n", err)
-				time.Sleep(100 * time.Millisecond)
-				continue
-			}
-			break
-		}
-		defer dbpool.Close()
-		dbpool.Exec(context.Background(), "DROP DATABASE directory")
-		_, err := dbpool.Exec(context.Background(), "CREATE DATABASE directory")
-		if err != nil {
-			return fmt.Errorf("failed to create DB: %w", err), nil
-		}
-	}
-	var db *sql.DB
-	for {
-		var err error
-		db, err = sql.Open("pgx", "host=db user=postgres dbname=directory sslmode=disable")
-		if err != nil {
-			fmt.Printf("Can't connect or invalid config: %s\n", err)
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-		break
-	}
-	defer db.Close()
-
-	migrations := &migrate.FileMigrationSource{
-		Dir: "migrations",
-	}
-	_, err := migrate.Exec(db, "postgres", migrations, migrate.Up)
-	if err != nil {
-		return fmt.Errorf("Failure migrating: %w", err), nil
-	}
-
-	for {
-		dbpool, err := pgxpool.Connect(context.Background(), "host=db user=postgres dbname=directory sslmode=disable pool_max_conns=5")
-		if err != nil {
-			fmt.Printf("Can't connect or invalid config: %s\n", err)
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-		return nil, dbpool
-	}
+func init() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 }
 
-type Api struct {
-	sql         *pgxpool.Pool
-	hashLimiter chan struct{}
-}
-
-func Initialize() (error, *Api) {
-	a := new(Api)
-	err, sql := initsql()
-	if err != nil {
-		return err, nil
-	}
-	a.sql = sql
-	a.hashLimiter = make(chan struct{}, 32)
-	for i := 0; i < cap(a.hashLimiter); i++ {
-		a.hashLimiter <- struct{}{}
-	}
-	return nil, a
-}
+var GenericSQLError error = errors.New("Error running SQL request")
 
 func uniqueID() (error, []byte) {
 	id := make([]byte, 16)
 	_, err := rand.Read(id)
 	if err != nil {
-		return fmt.Errorf("Error getting unique random ID: %w", err), nil
+		log.Println(err.Error())
+		return errors.New("Failed to generate user ID"), nil
 	}
 	return err, id
 }
 
+// Takes a query and an incomplete argument list where the last argument is missing, and needs to be a
+// random bytea value. The query must return a boolean indicating whether the record was successfully
+// inserted (true) or not (false). Returns the byte slice that succeeded.
+func (a *Api) attemptIdInsert(ctx context.Context, query string, args ...interface{}) (error, []byte) {
+	var (
+		id      []byte
+		err     error
+		success bool = false
+	)
+	for !success {
+		err, id = uniqueID()
+		if err != nil {
+			return err, nil
+		}
+		args2 := append(args, id)
+		err = a.sql.QueryRow(ctx, query, args2...).Scan(&success)
+		if err != nil {
+			log.Println(err.Error())
+			return GenericSQLError, nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err(), nil
+		}
+	}
+	return nil, id
+}
+
 // Speculatively inserts user into database, and returns a secret to be delivered to the user
 // by email to verify their identity.
-func (a *Api) StartReg(ctx context.Context, email, password string) (error, []byte) {
-	var deadline = time.Now().Add(3 * 24 * time.Hour)
-	println(deadline.Format(time.UnixDate))
-
-	if email == "" || password == "" {
-		return fmt.Errorf("Both username (%s) and password (%s) must not be empty", email, password), nil
+func (a *Api) StartReg(ctx context.Context, username, email, password string) (error, []byte) {
+	if username == "" || email == "" || password == "" {
+		return fmt.Errorf("Username (%s), email (%s) and password (%s) must all not be empty",
+			username, email, password), nil
 	}
 	err, passHash, hashAlgo := a.passHash(password)
 	if err != nil {
 		return err, nil
 	}
 
-	// Try repeatedly to insert a new user until we find a unique userid
-	var id []byte
-	for {
-		var err error
-		err, id = uniqueID()
-		if err != nil {
-			return err, nil
-		}
-		var success bool
-		err = a.sql.QueryRow(ctx, "SELECT attempt_start_reg($1, $2, $3, $4)",
-			id, email, hashAlgo, passHash).Scan(&success)
-		if err != nil {
-			return err, nil
-		}
-		if success {
-			break
-		}
-		if ctx.Err() != nil {
-			return ctx.Err(), nil
-		}
+	err, id := a.attemptIdInsert(ctx, "SELECT attempt_start_reg($1, $2, $3, $4, $5)",
+		username, email, hashAlgo, passHash)
+	if err != nil {
+		return err, nil
 	}
 
-	// Try repeatedly to insert an authentication token.
-	var secret []byte
-	for {
-		var err error
-		err, secret = uniqueID()
-		if err != nil {
-			return err, nil
-		}
-		var success bool
-		err = a.sql.QueryRow(ctx, "SELECT attempt_reg_secret_insert($1, $2, $3)",
-			secret, id, deadline).Scan(&success)
-		if err != nil {
-			return err, nil
-		}
-		if success {
-			break
-		}
-		if ctx.Err() != nil {
-			return ctx.Err(), nil
-		}
+	err, secret := a.attemptIdInsert(ctx, "SELECT attempt_reg_secret_insert($1, $2, $3)",
+		id, time.Now().Add(3*24*time.Hour))
+	if err != nil {
+		return err, nil
 	}
 	return nil, secret
 }
 
-// func FinishReg(ctx context.Context, email string, secret []byte) bool {
-//
-// }
+func (a *Api) authenticate(ctx context.Context, username, password string) (error, []byte) {
+	var (
+		userID       []byte
+		hashAlgo     int32
+		passwordHash string
+	)
+	err := a.sql.QueryRow(ctx, "SELECT hashAlgo, passHash FROM users WHERE username = $1", username).
+		Scan(&userID, &hashAlgo, &passwordHash)
+	if err != nil {
+		log.Println(err.Error())
+		return GenericSQLError, nil
+	}
+	err, same := a.passCompare(password, passwordHash, hashAlgo)
+	if err != nil {
+		log.Println(err.Error())
+		return errors.New("Failure to compare passwords"), nil
+	}
+	if !same {
+		return errors.New("Incorrect username or password"), nil
+	}
+	return nil, userID
+}
+
+func (a *Api) newToken(ctx context.Context, userID []byte) (error, []byte) {
+	err, token := a.attemptIdInsert(ctx, "SELECT attempt_token_insert($1, $2, $3)",
+		userID, time.Now().Add(31*24*time.Hour))
+	if err != nil {
+		log.Println(err.Error())
+		return GenericSQLError, nil
+	}
+	return nil, token
+}
+
+func (a *Api) FinishReg(ctx context.Context, secret []byte, email string) (err error, sessionToken []byte) {
+	var userID []byte
+	err = a.sql.QueryRow(ctx, "SELECT finish_reg($1, $2, $3)",
+		secret, email, time.Now()).Scan(&userID)
+	if err != nil {
+		log.Println(err.Error())
+		return GenericSQLError, nil
+	}
+	if userID == nil {
+		return errors.New("Invalid email or secret"), nil
+	}
+	err, token := a.newToken(ctx, userID)
+	if err != nil {
+		return err, nil
+	}
+	return nil, token
+}
+
+func (a *Api) GetToken(ctx context.Context, username, password string) (error, []byte) {
+	err, userID := a.authenticate(ctx, username, password)
+	if err != nil {
+		return err, nil
+	}
+	if userID == nil {
+		return errors.New("Incorrect username or password."), nil
+	}
+	err, token := a.newToken(ctx, userID)
+	if err != nil {
+		log.Println(err.Error())
+		return errors.New("Failure acquiring token"), nil
+	}
+	return nil, token
+}

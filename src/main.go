@@ -18,15 +18,30 @@ var (
 
 func handleAPI(w http.ResponseWriter, r *http.Request) {
 	postHandler := map[string]http.HandlerFunc{
-		"reg": func(w http.ResponseWriter, r *http.Request) {
+		"startReg": func(w http.ResponseWriter, r *http.Request) {
+			username := r.PostForm.Get("username")
 			email := r.PostForm.Get("email")
 			password := r.PostForm.Get("password")
-			err, secret := Api.StartReg(r.Context(), email, password)
+			err, secret := Api.StartReg(r.Context(), username, email, password)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 				return
 			}
 			fmt.Fprint(w, base64.URLEncoding.EncodeToString(secret))
+		},
+		"finishReg": func(w http.ResponseWriter, r *http.Request) {
+			secret, err := base64.URLEncoding.DecodeString(r.PostForm.Get("secret"))
+			if err != nil {
+				http.Error(w, "Error parsing secret base64", http.StatusUnprocessableEntity)
+				return
+			}
+			email := r.PostForm.Get("email")
+			err, userID := Api.FinishReg(r.Context(), secret, email)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				return
+			}
+			fmt.Fprint(w, base64.URLEncoding.EncodeToString(userID))
 		},
 	}
 
