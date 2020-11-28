@@ -22,7 +22,7 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 			username := r.PostForm.Get("username")
 			email := r.PostForm.Get("email")
 			password := r.PostForm.Get("password")
-			err, secret := Api.StartReg(r.Context(), username, email, password)
+			secret, err := Api.Copy().StartReg(r.Context(), username, email, password)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 				return
@@ -36,12 +36,22 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			email := r.PostForm.Get("email")
-			err, userID := Api.FinishReg(r.Context(), secret, email)
+			userID, err := Api.Copy().FinishReg(r.Context(), secret, email)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 				return
 			}
 			fmt.Fprint(w, base64.URLEncoding.EncodeToString(userID))
+		},
+		"getToken": func(w http.ResponseWriter, r *http.Request) {
+			username := r.PostForm.Get("username")
+			password := r.PostForm.Get("password")
+			token, err := Api.Copy().GetToken(r.Context(), username, password)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				return
+			}
+			fmt.Fprint(w, base64.URLEncoding.EncodeToString(token))
 		},
 	}
 
@@ -87,7 +97,7 @@ func main() {
 	}
 	srv := &http.Server{
 		Addr:         "0.0.0.0:8080",
-		Handler:      http.TimeoutHandler(http.DefaultServeMux, 10*time.Second, "timeout"),
+		Handler:      http.DefaultServeMux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  120 * time.Second,

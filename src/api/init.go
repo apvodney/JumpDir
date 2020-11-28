@@ -4,6 +4,8 @@ import (
 	"github.com/apvodney/JumpDir/debug"
 
 	"database/sql"
+	"github.com/jackc/pgconn"
+	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	_ "github.com/jackc/pgx/v4/stdlib"
 	"github.com/rubenv/sql-migrate"
@@ -14,7 +16,11 @@ import (
 )
 
 type Api struct {
-	sql         *pgxpool.Pool
+	sql interface {
+		Query(context.Context, string, ...interface{}) (pgx.Rows, error)
+		QueryRow(context.Context, string, ...interface{}) pgx.Row
+		Exec(context.Context, string, ...interface{}) (pgconn.CommandTag, error)
+	}
 	hashLimiter chan struct{}
 }
 
@@ -45,12 +51,11 @@ func initsql() (error, *pgxpool.Pool) {
 			}
 			break
 		}
-		defer dbpool.Close()
-		dbpool.Exec(context.Background(), "DROP DATABASE directory")
 		_, err := dbpool.Exec(context.Background(), "CREATE DATABASE directory")
 		if err != nil {
 			return fmt.Errorf("failed to create DB: %w", err), nil
 		}
+		dbpool.Close()
 	}
 	var db *sql.DB
 	for {
@@ -82,4 +87,10 @@ func initsql() (error, *pgxpool.Pool) {
 		}
 		return nil, dbpool
 	}
+}
+
+func (a *Api) Copy() *Api {
+	napi := new(Api)
+	*napi = *a
+	return napi
 }

@@ -1,3 +1,5 @@
   GDPR compliance
   OWASP vulnerability review
   Ensure random security when deploying
+  Make unit tests
+  Do permissions/users in postgres for Extra Paranoia

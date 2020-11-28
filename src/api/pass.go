@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/apvodney/JumpDir/api/fatalError"
 	"github.com/apvodney/JumpDir/api/saltPepper"
 
 	"encoding/base64"
@@ -12,8 +13,8 @@ import (
 )
 
 type algoEntry struct {
-	hash    func(pass string, args interface{}) (error, string)
-	compare func(pass, hash string, args interface{}) (error, bool)
+	hash    func(pass string, args interface{}) string
+	compare func(pass, hash string, args interface{}) bool
 	args    interface{}
 }
 
@@ -28,54 +29,44 @@ type scryptArgs struct {
 	keyLen int
 }
 
-func scryptCore(pass string, sp *saltPepper.SaltPepper, args interface{}) (error, string) {
+func scryptCore(pass string, sp *saltPepper.SaltPepper, args interface{}) string {
 	a, ok := args.(scryptArgs)
 	if !ok {
-		return errors.New("Can't cast arguments"), ""
+		fatalError.Panic(errors.New("Can't cast arguments"))
 	}
 	hash, err := scrypt.Key([]byte(pass), sp.SaltPepper, a.N, a.r, a.p, a.keyLen)
 	if err != nil {
-		return fmt.Errorf("Hash error: %w", err), ""
+		fatalError.Panic(fmt.Errorf("Hash error: %w", err))
 	}
-	return nil, fmt.Sprintf("%s$%s$%s",
+	return fmt.Sprintf("%s$%s$%s",
 		base64.URLEncoding.EncodeToString(sp.Salt),
 		strconv.Itoa(sp.PepperIndex),
 		base64.URLEncoding.EncodeToString(hash))
 }
 
-// Only returns error in very unusual circumstances
-func scryptHash(pass string, args interface{}) (error, string) {
-	err, sp := saltPepper.NewSaltPepper()
-	if err != nil {
-		return err, ""
-	}
+func scryptHash(pass string, args interface{}) string {
+	sp := saltPepper.NewSaltPepper()
 	return scryptCore(pass, sp, args)
 }
 
-func scryptCompare(pass, hash1 string, args interface{}) (error, bool) {
+func scryptCompare(pass, hash1 string, args interface{}) bool {
 	var parseErr error = errors.New("Fatal error, unparsable password hash")
 	sh := strings.Split(hash1, "$")
 	if len(sh) != 3 {
-		return parseErr, false
+		fatalError.Panic(parseErr)
 	}
 	salt, err := base64.URLEncoding.DecodeString(sh[0])
 	if err != nil {
-		return parseErr, false
+		fatalError.Panic(parseErr)
 	}
 	pepperIndex, err := strconv.Atoi(sh[1])
 	if err != nil {
-		return parseErr, false
+		fatalError.Panic(parseErr)
 	}
-	err, sp := saltPepper.OldSaltPepper(salt, pepperIndex)
-	if err != nil {
-		return err, false
-	}
+	sp := saltPepper.OldSaltPepper(salt, pepperIndex)
 
-	err, hash2 := scryptCore(pass, sp, args)
-	if err != nil {
-		return err, false
-	}
-	return nil, hash1 == hash2
+	hash2 := scryptCore(pass, sp, args)
+	return hash1 == hash2
 }
 
 func (a *Api) passwdBatonRecv() struct{} {
@@ -86,18 +77,18 @@ func (a *Api) passwdBatonPass(baton struct{}) {
 	a.hashLimiter <- baton
 }
 
-func (a *Api) passHash(pass string) (error, string, int32) {
+func (a *Api) passHash(pass string) (string, int32) {
 	baton := a.passwdBatonRecv()
 	defer a.passwdBatonPass(baton)
 	hashAlgo := int32(len(passAlgos) - 1)
 	entry := passAlgos[hashAlgo]
-	err, passHash := entry.hash(pass, entry.args)
-	return err, passHash, hashAlgo
+	passHash := entry.hash(pass, entry.args)
+	return passHash, hashAlgo
 }
 
-func (a *Api) passCompare(pass, hash string, hashAlgo int32) (error, bool) {
+func (a *Api) passCompare(pass, hash string, hashAlgo int32) bool {
 	if hashAlgo < 0 || int(hashAlgo) >= len(passAlgos) {
-		return errors.New("Fatal error, incorrect algo number"), false
+		fatalError.Panic(errors.New("Fatal error, incorrect algo number"))
 	}
 	entry := passAlgos[hashAlgo]
 	return entry.compare(pass, hash, entry.args)

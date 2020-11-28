@@ -13,25 +13,19 @@ type SaltPepper struct {
 	PepperIndex int
 }
 
-func NewSaltPepper() (error, *SaltPepper) {
-	err, salt := newSalt()
-	if err != nil {
-		return err, nil
-	}
+func NewSaltPepper() *SaltPepper {
+	salt := newSalt()
 	pepper, pepperIndex := newPepper()
-	return nil, &SaltPepper{
+	return &SaltPepper{
 		SaltPepper:  constructSaltPepper(salt, pepper),
 		Salt:        salt,
 		PepperIndex: pepperIndex,
 	}
 }
 
-func OldSaltPepper(salt []byte, pepperIndex int) (error, *SaltPepper) {
-	err, pepper := oldPepper(pepperIndex)
-	if err != nil {
-		return err, nil
-	}
-	return nil, &SaltPepper{
+func OldSaltPepper(salt []byte, pepperIndex int) *SaltPepper {
+	pepper := oldPepper(pepperIndex)
+	return &SaltPepper{
 		SaltPepper:  constructSaltPepper(salt, pepper),
 		Salt:        salt,
 		PepperIndex: pepperIndex,

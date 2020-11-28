@@ -1,15 +1,19 @@
 package saltPepper
 
-import "errors"
+import (
+	"github.com/apvodney/JumpDir/api/fatalError"
+
+	"errors"
+)
 
 func newPepper() ([]byte, int) {
 	newest := len(peppers) - 1
 	return peppers[newest], newest
 }
 
-func oldPepper(i int) (error, []byte) {
+func oldPepper(i int) []byte {
 	if i < 0 || i >= len(peppers) {
-		return errors.New("Invalid index"), nil
+		fatalError.Panic(errors.New("Invalid pepper index"))
 	}
-	return nil, peppers[i]
+	return peppers[i]
 }
