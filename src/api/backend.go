@@ -41,7 +41,7 @@ func init() {
 			id := make([]byte, 6*3) // We multiply by 3 because it encodes neatly into b64
 			_, err := b.Read(id)
 			if err != nil {
-				rb.err = errors.New("Failed to generate user ID")
+				rb.err = errors.New("Failed to generate unique ID")
 				cancel()
 				return
 			}

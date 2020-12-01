@@ -7,4 +7,5 @@ require (
 	github.com/lib/pq v1.8.0
 	github.com/rakyll/statik v0.1.7
 	github.com/rubenv/sql-migrate v0.0.0-20200616145509-8d140a17f351
+	robpike.io/ivy v0.0.0-20200329095838-e5a40e4ecd3b // indirect
 )
