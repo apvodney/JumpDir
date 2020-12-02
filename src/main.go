@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -65,7 +64,7 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var ok bool
-		hf, ok = postHandler[strings.TrimLeft(r.URL.Path, "/api/")]
+		hf, ok = postHandler[r.URL.Path]
 		if !ok {
 			http.Error(w, "API endpoint does not exist", http.StatusNotFound)
 			fmt.Print("invalid endpoint:", r.URL.Path)
@@ -92,7 +91,7 @@ func main() {
 	http.HandleFunc("/", frontpage)
 	fmt.Println(debug.True)
 	if debug.True {
-		http.HandleFunc("/api/", handleAPI)
+		http.Handle("/api/", http.StripPrefix("/api/", http.HandlerFunc(handleAPI)))
 		fmt.Println("api registered.")
 	}
 	srv := &http.Server{
