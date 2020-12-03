@@ -38,7 +38,7 @@ func init() {
 	randomWorker := func(rb *randBuf) {
 		b := bufio.NewReader(rand.Reader)
 		for {
-			id := make([]byte, 6*3) // We multiply by 3 because it encodes neatly into b64
+			id := make([]byte, 16)
 			_, err := b.Read(id)
 			if err != nil {
 				rb.err = errors.New("Failed to generate unique ID")
